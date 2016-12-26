@@ -1,0 +1,36 @@
+# A typical CI-NEB calculation
+fireworks:
+#- fw: atomate.vasp.fireworks.core.OptimizeFW
+- fw: pymacy.fireworks.neb_fireworks.PreNEBFW
+  params:
+    parents: 0
+- fw: pymacy.fireworks.neb_fireworks.EndPointRelaxationFW
+  params:
+    parents: 1
+    ep_index: 0
+    user_incar_settings:
+      EDIFF: 5e-5
+      EDIFFG: -0.05
+      ISIF: 2
+- fw: pymacy.fireworks.neb_fireworks.EndPointRelaxationFW
+  params:
+    parents: 1
+    ep_index: 1
+    user_incar_settings:
+      EDIFF: 5e-5
+      EDIFFG: -0.05
+      ISIF: 2
+- fw: pymacy.fireworks.neb_fireworks.NEBFW
+  params:
+    parents: [2,3]
+    user_incar_settings:
+      EDIFFG: -0.08
+      IOPT: 3
+      ISIF: 2
+- fw: pymacy.fireworks.neb_fireworks.NEBFW
+  params:
+    parents: 4
+    user_incar_settings:
+      EDIFFG: -0.05
+      IOPT: 1
+      ISIF: 2
