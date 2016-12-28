@@ -12,7 +12,7 @@ import numpy as np
 
 from monty.json import MontyEncoder
 
-from fireworks import FireTaskBase, FWAction, explicit_serialize
+from fireworks import FiretaskBase, FWAction, explicit_serialize
 from fireworks.utilities.fw_serializers import DATETIME_HANDLER
 
 from atomate.utils.utils import env_chk, get_calc_loc, get_meta_from_structure
@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 
 
 @explicit_serialize
-class VaspToDbTask(FireTaskBase):
+class VaspToDbTask(FiretaskBase):
     """
     Enter a VASP run into the database. Uses current directory unless you
     specify calc_dir or calc_loc.
@@ -130,7 +130,7 @@ class VaspToDbTask(FireTaskBase):
 
 
 @explicit_serialize
-class BoltztrapToDBTask(FireTaskBase):
+class BoltztrapToDBTask(FiretaskBase):
     """
     Enter a Boltztrap run into the database.
 
@@ -149,8 +149,7 @@ class BoltztrapToDBTask(FireTaskBase):
         d["boltztrap_dir"] = btrap_dir
 
         # trim the output
-        for x in ['cond', 'seebeck', 'kappa', 'hall', 'mu_steps',
-                  'mu_doping', 'carrier_conc']:
+        for x in ['cond', 'seebeck', 'kappa', 'hall', 'mu_steps', 'mu_doping', 'carrier_conc']:
             del d[x]
 
         if not self.get("hall_doping"):
@@ -160,8 +159,7 @@ class BoltztrapToDBTask(FireTaskBase):
 
         # add the structure
         bandstructure_dir = os.getcwd()
-        v, o = get_vasprun_outcar(bandstructure_dir, parse_eigen=False,
-                                  parse_dos=False)
+        v, o = get_vasprun_outcar(bandstructure_dir, parse_eigen=False, parse_dos=False)
         structure = v.final_structure
         d["structure"] = structure.as_dict()
         d.update(get_meta_from_structure(structure))
@@ -188,8 +186,7 @@ class BoltztrapToDBTask(FireTaskBase):
 
             # dos gets inserted into GridFS
             dos = json.dumps(d["dos"], cls=MontyEncoder)
-            fsid, compression = mmdb.insert_gridfs(
-                dos, collection="dos_boltztrap_fs", compress=True)
+            fsid, compression = mmdb.insert_gridfs(dos, collection="dos_boltztrap_fs", compress=True)
             d["dos_boltztrap_fs_id"] = fsid
             del d["dos"]
 
@@ -197,7 +194,7 @@ class BoltztrapToDBTask(FireTaskBase):
 
 
 @explicit_serialize
-class ElasticTensorToDbTask(FireTaskBase):
+class ElasticTensorToDbTask(FiretaskBase):
     """
     Analyzes the stress/strain data of an elastic workflow to produce
     an elastic tensor and various other quantities.
@@ -219,14 +216,13 @@ class ElasticTensorToDbTask(FireTaskBase):
         d = {"analysis": {}, "deformation_tasks": fw_spec["deformation_tasks"],
              "initial_structure": self['structure'].as_dict(),
              "optimized_structure": opt_struct.as_dict()}
-        if fw_spec.get("tags",None):
+        if fw_spec.get("tags", None):
             d["tags"] = fw_spec["tags"]
         dtypes = fw_spec["deformation_tasks"].keys()
         defos = [fw_spec["deformation_tasks"][dtype]["deformation_matrix"]
                  for dtype in dtypes]
         stresses = [fw_spec["deformation_tasks"][dtype]["stress"] for dtype in dtypes]
-        stress_dict = {IndependentStrain(defo) : Stress(stress) for defo, stress
-                       in zip(defos, stresses)}
+        stress_dict = {IndependentStrain(defo) : Stress(stress) for defo, stress in zip(defos, stresses)}
 
         logger.info("ANALYZING STRESS/STRAIN DATA")
         # DETERMINE IF WE HAVE 6 "UNIQUE" deformations
@@ -261,7 +257,7 @@ class ElasticTensorToDbTask(FireTaskBase):
 
 
 @explicit_serialize
-class RamanSusceptibilityTensorToDbTask(FireTaskBase):
+class RamanSusceptibilityTensorToDbTask(FiretaskBase):
     """
     Raman susceptibility tensor for each mode = Finite difference derivative of the dielectric
         tensor wrt the displacement along that mode.
@@ -333,7 +329,7 @@ class RamanSusceptibilityTensorToDbTask(FireTaskBase):
 
 
 @explicit_serialize
-class GibbsFreeEnergyTask(FireTaskBase):
+class GibbsFreeEnergyTask(FiretaskBase):
     """
     Compute the quasi-harmonic gibbs free energy. There are 2 options available for the
     quasi-harmonic approximation (set via 'qha_type' parameter):
@@ -424,7 +420,7 @@ class GibbsFreeEnergyTask(FireTaskBase):
 
 
 @explicit_serialize
-class FitEquationOfStateTask(FireTaskBase):
+class FitEquationOfStateTask(FiretaskBase):
     """
     Retrieve the energy and volume data and fit it to the given equation of state. The summary dict
     is written to 'bulk_modulus.json' file.
@@ -478,7 +474,7 @@ class FitEquationOfStateTask(FireTaskBase):
 
 
 @explicit_serialize
-class ThermalExpansionCoeffTask(FireTaskBase):
+class ThermalExpansionCoeffTask(FiretaskBase):
     """
     Compute the quasi-harmonic thermal expansion coefficient using phonopy.
 
