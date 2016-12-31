@@ -24,7 +24,7 @@ __author__ = 'Hanmei Tang'
 __email__ = 'hat003@eng.ucsd.edu'
 
 
-def use_neb_fake_vasp(original_wf, ref_dirs, params_to_check=None, is_neb=False):
+def use_neb_fake_vasp(original_wf, ref_dirs, params_to_check=None):
     """
     Replaces all tasks with "RunVasp" (e.g. RunVaspDirect) to be
     RunVaspFake. Or replace all "RunNEBVasp" to be "RunNEBVaspFake".
@@ -35,7 +35,6 @@ def use_neb_fake_vasp(original_wf, ref_dirs, params_to_check=None, is_neb=False)
         original_wf (Workflow)
         ref_dirs (dict): key=firework name, value=path to the reference vasp calculation directory
         params_to_check (list): optional list of incar parameters to check.
-        is_neb (bool): using "RunNEBVaspFake"
     """
     if not params_to_check:  # TODO: Check the default INCAR setting.
         params_to_check = ["ISPIN", "ENCUT", "ISMEAR", "SIGMA", "IBRION", "LORBIT", "NBANDS", "LMAXMIX"]
@@ -47,7 +46,7 @@ def use_neb_fake_vasp(original_wf, ref_dirs, params_to_check=None, is_neb=False)
                     if "RunVasp" in str(t):
                         wf_dict["fws"][idx_fw]["spec"]["_tasks"][idx_t] = \
                             RunVaspFake(ref_dir=ref_dirs[job_type], params_to_check=params_to_check).to_dict()
-                    if "RunVasp" in str(t) and is_neb:  # TODO: Mark of additional tag.
+                    if "RunNEBVasp" in str(t):  # TODO: Mark of additional tag.
                         wf_dict["fws"][idx_fw]["spec"]["_tasks"][idx_t] = \
                             RunNEBVaspFake(ref_dir=ref_dirs[job_type], params_to_check=params_to_check).to_dict()
     return Workflow.from_dict(wf_dict)

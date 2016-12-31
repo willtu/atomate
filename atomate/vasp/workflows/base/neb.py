@@ -2,9 +2,11 @@
 # coding: utf-8
 
 """
-Implements a NEBWorkflowManager for creating NEB workflow using neb_tasks.py.
-It is recommended to run some primary tests to determine a reasonable
-convergence criterion before carrying out high-throughput simulation.
+This module defines the Climbing Image Nudged Elastic Band (CI-NEB) workflow.
+1) initial relaxation fireworks (pre-defined)
+2) Generate endpoints --> Two endpoints relaxation
+3) Use two endpoints --> Generate images --> CI-NEB
+4)                       Images --> CI-NEB
 """
 
 import logging
@@ -13,94 +15,113 @@ import os
 
 from monty.serialization import loadfn
 from pymatgen.core import Structure
+from pymatgen.io.vasp.sets import MPRelaxSet, MPStaticSet
+from custodian.vasp.jobs import VaspJob, VaspNEBJob
 from pymatgen_diffusion.neb.io import MVLCINEBEndPointSet, MVLCINEBSet
-from custodian.vasp.jobs import VaspJob
 from fireworks.core.firework import Firework, Workflow
+from atomate.utils.utils import get_logger
+from atomate.utils.utils import get_wf_from_spec_dict
+from atomate.vasp.firetasks.write_inputs import WriteNEBFromImages
+from atomate.vasp.firetasks.neb_tasks import WriteEndpointInputTask, \
+    RunVASPCustodianTask, \
+    TransferNEBTask, SetupNEBTask  # InsertNEBDBTask, GetEndpointsFromIndexTask, WriteNEBInputTask
 
-from pymacy.fireworks.custodian_test import VaspNEBJob
-from pymacy.fireworks.neb_firetasks import GetEndpointsFromIndexTask, \
-    WriteEndpointInputTask, WriteNEBInputTask, RunVASPCustodianTask, \
-    TransferNEBTask, InsertNEBDBTask, SetupNEBTask
+from atomate.vasp.firetasks.glue_tasks import PassStressStrainData
+from atomate.vasp.fireworks.core import OptimizeFW, TransmuterFW
+from atomate.vasp.fireworks.core_add import *
 
-try:
-    from atomate.utils.utils import get_wf_from_spec_dict
-except:
-    get_wf_from_spec_dict = None
 
 __author__ = "Hanmei Tang, Iek-Heng Chu"
-__version__ = "1.0"
-__status__ = "Development"
-__date__ = "December 20, 2016"
+__email__ = 'hat003@eng.ucsd.edu, ihchu@eng.ucsd.edu'
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logger = get_logger(__name__, level=logging.DEBUG)
 
 module_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)))
 
+spec = {"_category": "",  # <-- config
+        "neb_id": 0,  # update runtime
+        "perfect_dir": "",  # update runtime
+        "endpoints_dirs": ["", ""],  # update runtime
+        "neb_dirs": {},  # key = 1, 2 ... are path_id
+        "pathway_sites": [],  # set outside by user
+        "perfect_cell": {},  # from input
+        "endpoints_0": {},  # from runtime or input
+        "endpoints_1": {},  # from runtime or input
+        "images": [],  # list of Structure (ini 01 02...end)
+        "ini_user_incar_settings": {},  # config
+        "ep_user_incar_settings": {},  # <-- config
+        "neb_user_incar_settings_init": {},  # <-- config
+        "neb_user_incar_settings_accu": {},  # <-- config
+        "neb_vasp_cmd": [],  # <-- config, updated by user
+        "neb_vasp_cmd_gam": [],  # <-- config
+        "_queueadapter": {"nnodes": 1}  # <-- user
+        }
 
-class PreNEBFW(Firework):
+def get_wf_neb(structures, name="neb workflow", db_file=None):
+    """Return neb workflow according to inputs."""
+    if len(structures) == 1:
+        workflow = get_wf_neb_from_structure(structures[0])
+    elif len(structures) == 2:
+        workflow = get_wf_neb_from_endpoints(structures)
+    else:
+        workflow = get_wf_neb_from_images(structures)
+    return workflow
+
+
+def get_wf_neb_from_structure(structure, name="initial", db_file=None):
     """
-    Initial relaxation workflow.
-    Once finished, generating Endpoint workflow.
-    TODO: NEB_ID, PATH_ID , MECHANISM, USE_DB_OR_NOT
+    Returns a CI-NEB workflow from a given perfect structure.
+    Args:
+        structure:
+        name:
+        db_file:
+
+    Returns:
+
     """
-
-    def __init__(self, structure, name="Initial NEB setup"):
-        ep_0 = GetEndpointsFromIndexTask(parent_structure=structure)
-        setup = SetupNEBTask()
+    workflow = None
+    return workflow
 
 
-class EndPointRelaxationFW(Firework):
+def get_wf_neb_from_endpoints(structures, name="endpoints", db_file=None):
     """
-    Endpoint workflow.
-    Once finished, generating NEB workflow.
+    Returns a CI-NEB workflow from two given endpoints.
+
+    Args:
+        structures:
+        name:
+        db_file:
+
+    Returns:
+
     """
-
-    def __init__(self, structure, ep_index,
-                 name="Endpoint relaxations",
-                 vasp_input_set=None,
-                 vasp_cmd="vasp", gamma_vasp_cmd="vasp.gamma",
-                 parents=parents,
-                 override_default_vasp_params=None,
-                 db_file=None, **kwargs):
-        override_default_vasp_params = override_default_vasp_params or {}
-        vasp_input_set = vasp_input_set or MVLCINEBEndPointSet(structure,
-                                                               **override_default_vasp_params)
-
-        defaults = {"ISIF": 2}
-
-        if user_incar_settings:
-            defaults.update(user_incar_settings)
-
-        job_rlx = [VaspJob(vasp_cmd=vasp_cmd,
-                           gamma_vasp_cmd=gamma_vasp_cmd,
-                           auto_npar=False)]
-
-        vasp_rlx = RunVASPCustodianTask(jobs=[j.as_dict() for j in job_rlx],
-                                        handlers=[],
-                                        custodian_params={})
-
-        ep_write = WriteEndpointInputTask(ep_index=ep_index,
-                                          user_incar_settings=defaults)
-        ep_transfer = TransferRelaxationTask(type="endpoints", ep_index=ep_index)
-
-        super(EndPointRelaxationFW, self).__init__([ep_write, vasp_rlx, ep_transfer],
-                                                   parents=parents, name="{}-{}".
-                                                   format(structure.composition.reduced_formula, name),
-                                                   **kwargs)
+    workflow = None
+    return workflow
 
 
-class NEBFW(Firework):
+def get_wf_neb_from_images(structures, name="neb", db_file=None):
     """
-    NEB Workflow.
+    Returns a CI-NEB workflow from given images.
+
+    Args:
+        structures ([structure_0, structure_1, ...]): The image structures.
+        name (str): some appropriate name for the workflow.
+        db_file (str): path to file containing the database credentials.
+
+    Returns:
+        Workflow
     """
+    logger.info("Get workflow from images.")
 
-    def __init__(self, structure, name="CINEB calculation"):
-        job_neb = [VaspNEBJob(spec["neb_vasp_cmd"],
-                              gamma_vasp_cmd=spec["neb_vasp_cmd_gam"],
-                              auto_npar=False)]
+    fw1 = NEBFW(structures=structures, name=name)
+    fw2 = NEBFW(structures=structures, name=name)
+    workflow = Workflow([fw1, fw2], {fw1: [fw2]}, name="NEB Workflow")
 
-        vasp_neb = RunVASPCustodianTask(jobs=[j.as_dict() for j in job_neb],
-                                        is_neb=True,
-                                        handlers=[],
-                                        custodian_params={})
+    return workflow
+
+
+if __name__ == "__main__":
+    from pymatgen.util.testing import PymatgenTest
+
+    structures = [PymatgenTest.get_structure("Si")]
+    wf = get_wf_neb(structures)

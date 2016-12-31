@@ -35,6 +35,25 @@ __credits__ = 'Shyue Ping Ong <ong.sp>'
 logger = get_logger(__name__)
 
 
+# @explicit_serialize
+# class RunNEBVaspDirect(FiretaskBase):
+#     """
+#     Run VASP directly for CI-NEB (no custodian).
+#
+#     Required params:
+#         vasp_cmd (str): the name of the full executable for running VASP.
+#         Supports env_chk.
+#     """
+#     # TODO: Combine this method with RunVaspDirect in run_calc.py.
+#     required_params = ["vasp_cmd"]
+#
+#     def run_task(self, fw_spec):
+#         vasp_cmd = env_chk(self["vasp_cmd"], fw_spec)
+#         logger.info("Running VASP using exe: {}".format(vasp_cmd))
+#         return_code = subprocess.call(vasp_cmd, shell=True)
+#         logger.info("VASP finished running with returncode: {}".format(return_code))
+
+
 @explicit_serialize
 class RunNEBVaspFake(FiretaskBase):
     """
