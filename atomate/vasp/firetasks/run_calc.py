@@ -20,7 +20,7 @@ from custodian import Custodian
 from custodian.vasp.handlers import VaspErrorHandler, AliasingErrorHandler, MeshSymmetryErrorHandler, \
     UnconvergedErrorHandler, MaxForceErrorHandler, PotimErrorHandler, FrozenJobErrorHandler, \
     NonConvergingErrorHandler, PositiveEnergyErrorHandler, WalltimeHandler
-from custodian.vasp.jobs import VaspJob
+from custodian.vasp.jobs import VaspJob, VaspNEBJob
 from custodian.vasp.validators import VasprunXMLValidator, VaspFilesValidator
 
 from fireworks import explicit_serialize, FiretaskBase
@@ -88,7 +88,8 @@ class RunVaspCustodian(FiretaskBase):
 
     Optional params:
         job_type: (str) - choose from "normal" (default),
-            "double_relaxation_run" (two consecutive jobs), and "full_opt_run"
+            "double_relaxation_run" (two consecutive jobs),
+            "full_opt_run" and "neb" (CI-NEB job).
         handler_group: (str) - group of handlers to use. See handler_groups
             dict in the code for the groups and complete list of handlers in
             each group.
@@ -147,6 +148,10 @@ class RunVaspCustodian(FiretaskBase):
         elif job_type == "full_opt_run":
             jobs = VaspJob.full_opt_run(vasp_cmd, auto_npar=auto_npar, ediffg=self.get("ediffg"),
                                         max_steps=5, half_kpts_first_relax=False)
+        elif job_type == "neb":
+            jobs = VaspNEBJob(vasp_cmd, auto_npar=False, final=False,
+                              auto_gamma=True, half_kpts=True,
+                              gamma_vasp_cmd=gamma_vasp_cmd)
         else:
             raise ValueError("Unsupported job type: {}".format(job_type))
 
