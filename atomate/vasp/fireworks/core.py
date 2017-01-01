@@ -9,13 +9,16 @@ sequences of VASP calculations.
 
 from fireworks import Firework
 
-from pymatgen.io.vasp.sets import MPRelaxSet, MITMDSet
+from pymatgen.io.vasp.sets import MPRelaxSet, MITMDSet, MITRelaxSet
+from pymatgen_diffusion.neb.io import MVLCINEBSet, MVLCINEBEndPointSet
 
 from atomate.common.firetasks.glue_tasks import PassCalcLocs
 from atomate.vasp.firetasks.glue_tasks import CopyVaspOutputs, PassEpsilonTask, PassNormalmodesTask
 from atomate.vasp.firetasks.parse_outputs import VaspToDbTask, BoltztrapToDBTask
 from atomate.vasp.firetasks.run_calc import RunVaspCustodian, RunBoltztrap
 from atomate.vasp.firetasks.write_inputs import *
+from atomate.vasp.firetasks.neb_tasks import WriteNEBFromImages, WriteNEBFromEndpoints
+from atomate.utils.utils import get_logger
 
 
 class OptimizeFW(Firework):
@@ -77,7 +80,7 @@ class StaticFW(Firework):
                 t.append(CopyVaspOutputs(calc_loc=True, contcar_to_poscar=True))
             t.append(WriteVaspStaticFromPrev(prev_calc_dir='.'))
         else:
-            vasp_input_set =  vasp_input_set or MPStaticSet(structure)
+            vasp_input_set = vasp_input_set or MPStaticSet(structure)
             t.append(WriteVaspFromIOSet(structure=structure, vasp_input_set=vasp_input_set))
 
         t.append(RunVaspCustodian(vasp_cmd=vasp_cmd, auto_npar=">>auto_npar<<"))
@@ -360,3 +363,174 @@ class BoltztrapFW(Firework):
              PassCalcLocs(name=name)]
         super(BoltztrapFW, self).__init__(t, parents=parents, name="{}-{}".format(
             structure.composition.reduced_formula, name), **kwargs)
+
+
+class RelaxFW(Firework):
+    """
+    Perfect cell relaxation Firework in NEB Workflow.
+
+    Task 1) Read in a structure
+    Task 2) Run VASP using Custodian
+    Task 3) Transfer results and pass CalcLocs named as "rlx_dir"
+    """
+
+    def __init__(self, spec, name="composition",
+                 vasp_input_set=MITRelaxSet,
+                 user_incar_settings=None,
+                 vasp_cmd=">>vasp_cmd<<",
+                 gamma_vasp_cmd=">>gamma_vasp_cmd<<",
+                 **cust, **kwargs):
+        """
+        Args:
+            spec (dict): Specification of the job to run.
+            name(str): A descriptive name for this fireworks
+            vasp_input_set (VaspInputSet): Input set to use.
+            user_incar_settings (dict): Additional INCAR settings.
+            vasp_cmd (str): Command to run vasp.
+            gamma_vasp_cmd (str): Command to run vasp gamma.
+            \*\*cust: Other kwargs that are passed to RunVaspCustodian.
+            \*\*kwargs: Other kwargs that are passed to Firework.__init__.
+        """
+        logger = get_logger(__name__)
+        logger.info("Perfect cell relaxation Firework in NEB Workflow.")
+
+        # Get "perfect_cell" from spec
+        if "perfect_cell" not in spec:
+            raise ValueError("Perfect cell structure not found in spec!")
+        structure = Structure.from_dict(spec["perfect_cell"])
+
+        # Task 1
+        incar = user_incar_settings or {}
+        write_ini_task = WriteVaspFromIOSet(structure=structure,
+                                            vasp_input_set=vasp_input_set,
+                                            vasp_input_params={
+                                                "user_incar_settings": incar
+                                            })
+        # Task 2
+        run_ini_task = RunVaspCustodian(vasp_cmd=vasp_cmd,
+                                        gamma_vasp_cmd=gamma_vasp_cmd,
+                                        job_type="normal", **cust)
+        # Task 3
+        tasks = [write_ini_task,
+                 run_ini_task,
+                 PassCalcLocs(name="rlx_dir")]
+
+        super(RelaxFW, self).__init__(tasks,
+                                      name="rlx_{}".format(name),
+                                      **kwargs)
+
+
+class EpRelaxationFW(Firework):
+    """
+    Endpoints relaxation Firework in NEB Workflow.
+
+    Task 1) Read in a structure with "ep_label" ("0" or "1")
+    Task 2) Run VASP using Custodian
+    Task 3) Transfer results and pass
+            CalcLocs named "ep_dir_{}".format(ep_label)
+    """
+
+    def __init__(self, spec,
+                 ep_label='0',
+                 name="composition",
+                 vasp_input_set=MVLCINEBEndPointSet,
+                 user_incar_settings=None,
+                 vasp_cmd=">>vasp_cmd<<",
+                 gamma_vasp_cmd=">>gamma_vasp_cmd<<",
+                 **cust, **kwargs):
+        """
+        Args:
+            spec (dict): Specification of the job to run.
+            ep_label (str): "0" or "1", denoting endpoint.
+            name(str): A descriptive name for this fireworks
+            vasp_input_set (VaspInputSet): Input set to use.
+            user_incar_settings (dict): Additional INCAR settings.
+            vasp_cmd (str): Command to run vasp.
+            gamma_vasp_cmd (str): Command to run vasp gamma.
+            \*\*cust: Other kwargs that are passed to RunVaspCustodian.
+            \*\*kwargs: Other kwargs that are passed to Firework.__init__.
+        """
+        logger = get_logger(__name__)
+        logger.info("Endpoints relaxation Firework in NEB Workflow.")
+
+        # Get "ep" from spec
+        if "ep" not in spec:
+            raise ValueError("Endpoint structures not found in spec!")
+
+        label = int(ep_label)
+        structure = Structure.from_dict(spec["ep"][label])
+
+        # Task 1
+        incar = user_incar_settings or {}
+        write_ep_task = WriteVaspFromIOSet(structure=structure,
+                                           vasp_input_set=vasp_input_set,
+                                           vasp_input_params={
+                                               "user_incar_settings": incar
+                                           })
+        # Task 2
+        run_ep_task = RunVaspCustodian(vasp_cmd=vasp_cmd,
+                                       gamma_vasp_cmd=gamma_vasp_cmd,
+                                       job_type="normal", **cust)
+        # Task 3
+        tasks = [write_ep_task,
+                 run_ep_task,
+                 PassCalcLocs(name="ep_dir_{}".format(label))]
+
+        super(EpRelaxationFW, self).__init__(tasks,
+                                             name="ep{}_{}".format(label, name),
+                                             **kwargs)
+
+
+class NEBFW(Firework):
+    """
+    CI-NEB Firework in NEB Workflow.
+
+    Task 1) Read in image structures with neb_label (1, 2 etc)
+    Task 2) Run NEB VASP using Custodian
+    Task 3) Transfer results and pass CalcLocs
+            named "neb_dir_{}".format(neb_label)
+    """
+
+    def __init__(self, spec,
+                 name="composition",
+                 neb_label="1",
+                 vasp_input_set=MVLCINEBSet,
+                 user_incar_settings=None,
+                 vasp_cmd=">>vasp_cmd<<",
+                 gamma_vasp_cmd=">>gamma_vasp_cmd<<",
+                 **cust, **kwargs):
+        """
+        Args:
+            spec (dict): Specification of the job to run.
+            neb_label (str): "1", "2"..., label neb run.
+            name(str): A descriptive name for this fireworks
+            vasp_input_set (VaspInputSet): Input set to use.
+            user_incar_settings (dict): Additional INCAR settings.
+            vasp_cmd (str): Command to run vasp.
+            gamma_vasp_cmd (str): Command to run vasp gamma.
+            \*\*cust: Other kwargs that are passed to RunVaspCustodian.
+            \*\*kwargs: Other kwargs that are passed to Firework.__init__.
+        """
+        logger = get_logger(__name__)
+        logger.info("CI-NEB Firework in NEB Workflow.")
+
+        if "images" not in spec:
+            raise ValueError("Images structures not found in spec!")
+
+        # Task 1
+        incar = user_incar_settings or {}
+        write_neb_task = WriteNEBFromImages(vasp_input_set=vasp_input_set,
+                                            user_incar_settings=incar)
+        # Task 2
+        run_neb_task = RunVaspCustodian(vasp_cmd=vasp_cmd,
+                                        gamma_vasp_cmd=gamma_vasp_cmd,
+                                        job_type="neb", **cust)
+
+        # Task 3
+        tasks = [write_neb_task,
+                 run_neb_task,
+                 PassCalcLocs(name="neb_dir_{}".format(neb_label))]
+
+        super(NEBFW, self).__init__(tasks,
+                                    name="neb{}_{}".format(neb_label, name),
+                                    **kwargs)
