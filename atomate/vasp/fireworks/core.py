@@ -437,7 +437,8 @@ class NEBFW(Firework):
     """
     CI-NEB Firework in NEB Workflow.
 
-    Task 1) Read in image structures with neb_label (1, 2 etc)
+    Task 1) Read in image structures from spec.
+            The group of structures are labeled with neb_label (1, 2...)
     Task 2) Run NEB VASP using Custodian
     Task 3) Transfer results and pass CalcLocs
             named "neb_dir_{}".format(neb_label)
