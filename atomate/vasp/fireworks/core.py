@@ -107,10 +107,10 @@ class HSEBSFW(Firework):
             db_file (str): Path to file specifying db credentials.
             \*\*kwargs: Other kwargs that are passed to Firework.__init__.
         """
-        if name==None:
+        if name == None:
             name = "{} {}".format("hse", mode)
 
-        t=[]
+        t = []
         t.append(CopyVaspOutputs(calc_loc=True, additional_files=["CHGCAR"]))
         t.append(WriteVaspHSEBSFromPrev(prev_calc_dir='.', mode=mode))
         t.append(RunVaspCustodian(vasp_cmd=vasp_cmd))
@@ -201,7 +201,7 @@ class LepsFW(Firework):
 
         t.extend([PassCalcLocs(name=name),
                   VaspToDbTask(db_file=db_file, additional_fields={"task_label": name})])
-        
+
         super(LepsFW, self).__init__(t, parents=parents, name="{}-{}".format(
             structure.composition.reduced_formula, name), **kwargs)
 
@@ -282,7 +282,7 @@ class TransmuterFW(Firework):
                                                    transformation_params=transformation_params,
                                                    vasp_input_set=vasp_input_set,
                                                    override_default_vasp_params=override_default_vasp_params))
-        
+
         t.append(RunVaspCustodian(vasp_cmd=vasp_cmd))
         t.append(PassCalcLocs(name=name))
         t.append(VaspToDbTask(db_file=db_file,
@@ -341,6 +341,7 @@ class MDFW(Firework):
                                    name="{}-{}".format(structure.composition.reduced_formula, name),
                                    **kwargs)
 
+
 class BoltztrapFW(Firework):
     def __init__(self, structure, name="boltztrap", db_file=None, parents=None, scissor=0.0,
                  soc=False, **kwargs):
@@ -365,73 +366,18 @@ class BoltztrapFW(Firework):
             structure.composition.reduced_formula, name), **kwargs)
 
 
-class RelaxFW(Firework):
+class NEBRelaxationFW(Firework):
     """
-    Perfect cell relaxation Firework in NEB Workflow.
+    Relaxation Firework in NEB Workflow.
 
-    Task 1) Read in a structure
-    Task 2) Run VASP using Custodian
-    Task 3) Transfer results and pass CalcLocs named as "rlx_dir"
-    """
-
-    def __init__(self, spec, name="composition",
-                 vasp_input_set=MITRelaxSet,
-                 user_incar_settings=None,
-                 vasp_cmd=">>vasp_cmd<<",
-                 gamma_vasp_cmd=">>gamma_vasp_cmd<<",
-                 **cust, **kwargs):
-        """
-        Args:
-            spec (dict): Specification of the job to run.
-            name(str): A descriptive name for this fireworks
-            vasp_input_set (VaspInputSet): Input set to use.
-            user_incar_settings (dict): Additional INCAR settings.
-            vasp_cmd (str): Command to run vasp.
-            gamma_vasp_cmd (str): Command to run vasp gamma.
-            \*\*cust: Other kwargs that are passed to RunVaspCustodian.
-            \*\*kwargs: Other kwargs that are passed to Firework.__init__.
-        """
-        logger = get_logger(__name__)
-        logger.info("Perfect cell relaxation Firework in NEB Workflow.")
-
-        # Get "perfect_cell" from spec
-        if "perfect_cell" not in spec:
-            raise ValueError("Perfect cell structure not found in spec!")
-        structure = Structure.from_dict(spec["perfect_cell"])
-
-        # Task 1
-        incar = user_incar_settings or {}
-        write_ini_task = WriteVaspFromIOSet(structure=structure,
-                                            vasp_input_set=vasp_input_set,
-                                            vasp_input_params={
-                                                "user_incar_settings": incar
-                                            })
-        # Task 2
-        run_ini_task = RunVaspCustodian(vasp_cmd=vasp_cmd,
-                                        gamma_vasp_cmd=gamma_vasp_cmd,
-                                        job_type="normal", **cust)
-        # Task 3
-        tasks = [write_ini_task,
-                 run_ini_task,
-                 PassCalcLocs(name="rlx_dir")]
-
-        super(RelaxFW, self).__init__(tasks,
-                                      name="rlx_{}".format(name),
-                                      **kwargs)
-
-
-class EpRelaxationFW(Firework):
-    """
-    Endpoints relaxation Firework in NEB Workflow.
-
-    Task 1) Read in a structure with "ep_label" ("0" or "1")
+    Task 1) Read in a structure with "st_label" ("rlx", "ep0" or "ep1")
     Task 2) Run VASP using Custodian
     Task 3) Transfer results and pass
-            CalcLocs named "ep_dir_{}".format(ep_label)
+            CalcLocs named "{}_dir".format(st_label)
     """
 
     def __init__(self, spec,
-                 ep_label='0',
+                 st_label='rlx',
                  name="composition",
                  vasp_input_set=MVLCINEBEndPointSet,
                  user_incar_settings=None,
@@ -441,7 +387,8 @@ class EpRelaxationFW(Firework):
         """
         Args:
             spec (dict): Specification of the job to run.
-            ep_label (str): "0" or "1", denoting endpoint.
+            st_label (str): "rlx" (relax), "0" (ep0) or "1" (ep1),
+                         st_label will be used in PassCalcLocs name.
             name(str): A descriptive name for this fireworks
             vasp_input_set (VaspInputSet): Input set to use.
             user_incar_settings (dict): Additional INCAR settings.
@@ -451,14 +398,18 @@ class EpRelaxationFW(Firework):
             \*\*kwargs: Other kwargs that are passed to Firework.__init__.
         """
         logger = get_logger(__name__)
-        logger.info("Endpoints relaxation Firework in NEB Workflow.")
+        logger.info("Relaxation Firework in NEB Workflow.")
 
-        # Get "ep" from spec
-        if "ep" not in spec:
-            raise ValueError("Endpoint structures not found in spec!")
+        # Get structure from spec
+        if "{}_st".format(st_label) not in spec:
+            raise ValueError("Required structures "
+                             "{} not found in spec!".format(st_label))
 
-        label = int(ep_label)
-        structure = Structure.from_dict(spec["ep"][label])
+        if st_label in ["rlx", "ep0", "ep1"]:
+            structure = Structure.from_dict(spec["{}_st".format(st_label)])
+        else:
+            raise ValueError("Unsupported structure label! "
+                             "Choose from \'rlx\', \'ep0\' and \'ep1\'.")
 
         # Task 1
         incar = user_incar_settings or {}
@@ -474,11 +425,12 @@ class EpRelaxationFW(Firework):
         # Task 3
         tasks = [write_ep_task,
                  run_ep_task,
-                 PassCalcLocs(name="ep_dir_{}".format(label))]
+                 PassCalcLocs(name="{}_dir".format(st_label))]
 
-        super(EpRelaxationFW, self).__init__(tasks,
-                                             name="ep{}_{}".format(label, name),
-                                             **kwargs)
+        super(NEBRelaxationFW,
+              self).__init__(tasks,
+                             name="{}_{}".format(st_label, name),
+                             **kwargs)
 
 
 class NEBFW(Firework):
