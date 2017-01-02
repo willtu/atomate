@@ -21,11 +21,12 @@ from pymatgen.alchemy.transmuters import StandardTransmuter
 from pymatgen.io.vasp import Incar, Poscar
 from pymatgen.io.vasp.sets import MPStaticSet, MPNonSCFSet, MPSOCSet, MPHSEBSSet
 
-from atomate.utils.utils import env_chk, load_class
+from atomate.utils.utils import env_chk, load_class, get_logger
 
 __author__ = 'Anubhav Jain, Shyue Ping Ong, Kiran Mathew'
 __email__ = 'ajain@lbl.gov'
 
+logger = get_logger(__name__)
 
 @explicit_serialize
 class WriteVaspFromIOSet(FiretaskBase):
@@ -357,3 +358,164 @@ class WriteNormalmodeDisplacedPoscar(FiretaskBase):
 
         # write the modified structure to poscar
         structure.to(fmt="poscar", filename="POSCAR")
+
+
+@explicit_serialize
+class WriteNEBFromImages(FiretaskBase):
+    """
+    Generate CI-NEB input sets using given image structures.
+
+    Required parameters:
+        vasp_input_set (AbstractVaspInputSet): full VaspInputSet object
+
+    Optional parameters:
+        user_incar_settings (dict): additional INCAR settings.
+        images (list[str]): list of files of image structures,
+            including the two endpoints.
+
+    fw_spec:
+        images (list[dict]): list of image structure dict,
+            including the two endpoints.
+    """
+    required_params = ["vasp_input_set"]
+    optional_params = ["images", "user_incar_settings"]
+
+    def run_task(self, fw_spec):
+        logger.info("WriteNEBFromImages")
+
+        vis_orig = self["vasp_input_set"]
+        user_incar_settings = self.get("user_incar_settings", {})
+        if "images" in self:
+            images = [Structure.from_file(i) for i in self["images"]]
+        else:
+            images = [Structure.from_dict(i) for i in fw_spec["images"]]
+
+        # Check images consistence.
+        atomic_numbers = images[0].atomic_numbers
+        for i in images:
+            if i.atomic_numbers != atomic_numbers:
+                raise ValueError("Images are inconsistent!")
+
+        # Set INCAR.
+        nimages = fw_spec["_queueadapter"]["nnodes"]
+        defaults = {"IMAGES": nimages}
+        defaults.update(user_incar_settings)
+
+        # Check vasp_input_set.
+        if hasattr(vis_orig, 'write_input'):
+            vis = vis_orig(structures=images, user_incar_settings=defaults)
+        else:
+            raise ValueError("Unknown vasp_input_set!")
+
+        vis.write_input(output_dir=".")
+
+
+@explicit_serialize
+class WriteNEBFromEndpoints(FiretaskBase):
+    """
+    Generate CI-NEB input sets using endpoint structures.
+    The number of images:
+        1) search in "user_incar_settings";
+        2) otherwise, calculate using "image_dist".
+
+    Required parameters:
+        vasp_input_set (AbstractVaspInputSet): full VaspInputSet object
+
+    Optional parameters:
+        endpoints (list of path str): Eg. ["E0/POSCAR", "E1/POSCAR"]
+        user_incar_settings (dict): additional INCAR settings.
+        sort_tol (float): Distance tolerance (in Angstrom) used to match the atomic
+                    indices between start and end structures. If it is set 0, then
+                    no sorting will be performed.
+        image_dist (float): distance in Angstrom, used in calculating number of images.
+                            Default 0.7 Angstrom.
+
+    fw_spec:
+    """
+
+    required_params = ["vasp_input_set"]
+    optional_params = ["endpoint_files", "user_incar_settings",
+                       "sort_tol", "image_dist"]
+
+    def run_task(self, fw_spec):
+        logger.info("WriteNEBSetFromEndpoints")
+
+        self._set_params(fw_spec)
+
+        # Get number of images.
+        user_incar_settings = self.user_incar_settings
+        if "IMAGES" in user_incar_settings:
+            nimages = user_incar_settings["IMAGES"]
+        else:
+            nimages = self._get_nimages()
+
+        image_files = []
+        images = self._get_images_by_linear_interp(nimages=nimages)
+        images = [i.as_dict() for i in images]
+        fw_spec.update({"images": images})
+
+        write = WriteNEBFromImages(vasp_input_set=self["vasp_input_set"],
+                                   user_incar_settings=user_incar_settings)
+
+        write.run_task(fw_spec=fw_spec)  # TODO: Double check
+
+    def _set_params(self, fw_spec):
+        if "endpoint_files" in self:
+            self.ep_0 = Structure.from_file(self["endpoint_files"][0])
+            self.ep_1 = Structure.from_file(self["endpoint_files"][1])
+        else:
+            self.ep_0 = Structure.from_dict(fw_spec["ep0_st"])
+            self.ep_1 = Structure.from_dict(fw_spec["ep1_st"])
+
+        self.user_incar_settings = self.get("user_incar_settings", {})
+        self.image_dist = self.get("image_dist", 0.7)
+        self.sort_tol = self.get("sort_tol", 0)
+
+    def _get_nimages(self):
+        """
+        Calculate the number of images using "image_dist", which can be
+        overwritten in a optional_params list.
+
+        Returns:
+            nimages (int): number of images.
+        """
+        ep_0 = self.ep_0
+        ep_1 = self.ep_1
+        image_dist = self.image_dist
+
+        # Check endpoints consistence.
+        if ep_0.atomic_numbers != ep_1.atomic_numbers:
+            raise ValueError("Endpoints are inconsistent!")
+
+        max_dist = 0
+        for s_0, s_1 in zip(ep_0, ep_1):
+            site_dist = ep_0.lattice.get_distance_and_image(s_0.frac_coords,
+                                                            s_1.frac_coords)[0]
+            if site_dist > max_dist:
+                max_dist = site_dist
+
+        # Number of images must more than one.
+        nimages = int(max_dist / image_dist) or 1
+
+        return nimages
+
+    def _get_images_by_linear_interp(self, nimages):
+        ep_0 = self.ep_0
+        ep_1 = self.ep_1
+        sort_tol = self.sort_tol
+
+        try:
+            images = ep_0.interpolate(ep_1,
+                                      nimages=nimages + 1,
+                                      autosort_tol=sort_tol)
+        except Exception as e:
+            if "Unable to reliably match structures " in str(e):
+                logger.warn("Auto sorting is turned off because it is "
+                            "unable to match the end-point structures!")
+                images = ep_0.interpolate(ep_1,
+                                          nimages=nimages + 1,
+                                          autosort_tol=0)
+            else:
+                raise e
+
+        return images

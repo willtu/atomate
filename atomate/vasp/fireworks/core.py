@@ -7,9 +7,9 @@ Defines standardized Fireworks that can be chained easily to perform various
 sequences of VASP calculations.
 """
 
-from fireworks import Firework
+from fireworks.core.firework import Firework
 
-from pymatgen.io.vasp.sets import MPRelaxSet, MITMDSet, MITRelaxSet
+from pymatgen.io.vasp.sets import MPRelaxSet, MITMDSet
 from pymatgen_diffusion.neb.io import MVLCINEBSet, MVLCINEBEndPointSet
 
 from atomate.common.firetasks.glue_tasks import PassCalcLocs
@@ -17,8 +17,6 @@ from atomate.vasp.firetasks.glue_tasks import CopyVaspOutputs, PassEpsilonTask, 
 from atomate.vasp.firetasks.parse_outputs import VaspToDbTask, BoltztrapToDBTask
 from atomate.vasp.firetasks.run_calc import RunVaspCustodian, RunBoltztrap
 from atomate.vasp.firetasks.write_inputs import *
-from atomate.vasp.firetasks.neb_tasks import WriteNEBFromImages, WriteNEBFromEndpoints
-from atomate.utils.utils import get_logger
 
 
 class OptimizeFW(Firework):
@@ -371,6 +369,7 @@ class NEBRelaxationFW(Firework):
     Relaxation Firework in NEB Workflow.
 
     Task 1) Read in a structure with "st_label" ("rlx", "ep0" or "ep1")
+            and generates input sets.
     Task 2) Run VASP using Custodian
     Task 3) Transfer results and pass
             CalcLocs named "{}_dir".format(st_label)
@@ -397,7 +396,6 @@ class NEBRelaxationFW(Firework):
             \*\*cust: Other kwargs that are passed to RunVaspCustodian.
             \*\*kwargs: Other kwargs that are passed to Firework.__init__.
         """
-        logger = get_logger(__name__)
         logger.info("Relaxation Firework in NEB Workflow.")
 
         # Get structure from spec
@@ -437,7 +435,7 @@ class NEBFW(Firework):
     """
     CI-NEB Firework in NEB Workflow.
 
-    Task 1) Read in image structures from spec.
+    Task 1) Read in image structures from spec and generates input sets.
             The group of structures are labeled with neb_label (1, 2...)
     Task 2) Run NEB VASP using Custodian
     Task 3) Transfer results and pass CalcLocs
@@ -447,7 +445,8 @@ class NEBFW(Firework):
     def __init__(self, spec,
                  name="composition",
                  neb_label="1",
-                 vasp_input_set=MVLCINEBSet,
+                 from_images=True,
+                 vasp_input_set=None,
                  user_incar_settings=None,
                  vasp_cmd=">>vasp_cmd<<",
                  gamma_vasp_cmd=">>gamma_vasp_cmd<<",
@@ -456,6 +455,8 @@ class NEBFW(Firework):
         Args:
             spec (dict): Specification of the job to run.
             neb_label (str): "1", "2"..., label neb run.
+            from_images (bool): Set True to initialize from image structures,
+                                False starting from relaxed endpoint structures.
             name(str): A descriptive name for this fireworks
             vasp_input_set (VaspInputSet): Input set to use.
             user_incar_settings (dict): Additional INCAR settings.
@@ -464,17 +465,23 @@ class NEBFW(Firework):
             \*\*cust: Other kwargs that are passed to RunVaspCustodian.
             \*\*kwargs: Other kwargs that are passed to Firework.__init__.
         """
-        logger = get_logger(__name__)
         logger.info("CI-NEB Firework in NEB Workflow.")
 
-        if "images" not in spec:
-            raise ValueError("Images structures not found in spec!")
-
-        # Task 1
+        # Task 1: Write NEB input sets
         incar = user_incar_settings or {}
-        write_neb_task = WriteNEBFromImages(vasp_input_set=vasp_input_set,
-                                            user_incar_settings=incar)
-        # Task 2
+        if vasp_input_set is None:
+            if from_images:
+                vasp_input_set = MVLCINEBSet
+                write_neb_task = WriteNEBFromImages(
+                    vasp_input_set=vasp_input_set,
+                    user_incar_settings=incar)
+            else:
+                vasp_input_set = MVLCINEBEndPointSet
+                write_neb_task = WriteNEBFromEndpoints(
+                    vasp_input_set=vasp_input_set,
+                    user_incar_settings=incar)
+
+        # Task 2: Run NEB using Custodian
         run_neb_task = RunVaspCustodian(vasp_cmd=vasp_cmd,
                                         gamma_vasp_cmd=gamma_vasp_cmd,
                                         job_type="neb", **cust)
