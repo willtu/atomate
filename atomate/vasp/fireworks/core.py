@@ -382,7 +382,7 @@ class NEBRelaxationFW(Firework):
                  user_incar_settings=None,
                  vasp_cmd=">>vasp_cmd<<",
                  gamma_vasp_cmd=">>gamma_vasp_cmd<<",
-                 **cust, **kwargs):
+                 cust_args=None, **kwargs):
         """
         Args:
             spec (dict): Specification of the job to run.
@@ -393,7 +393,7 @@ class NEBRelaxationFW(Firework):
             user_incar_settings (dict): Additional INCAR settings.
             vasp_cmd (str): Command to run vasp.
             gamma_vasp_cmd (str): Command to run vasp gamma.
-            \*\*cust: Other kwargs that are passed to RunVaspCustodian.
+            cust_args (dict): Other kwargs that are passed to RunVaspCustodian.
             \*\*kwargs: Other kwargs that are passed to Firework.__init__.
         """
         logger.info("Relaxation Firework in NEB Workflow.")
@@ -419,7 +419,7 @@ class NEBRelaxationFW(Firework):
         # Task 2
         run_ep_task = RunVaspCustodian(vasp_cmd=vasp_cmd,
                                        gamma_vasp_cmd=gamma_vasp_cmd,
-                                       job_type="normal", **cust)
+                                       job_type="normal", **cust_args)
         # Task 3
         tasks = [write_ep_task,
                  run_ep_task,
@@ -450,7 +450,7 @@ class NEBFW(Firework):
                  user_incar_settings=None,
                  vasp_cmd=">>vasp_cmd<<",
                  gamma_vasp_cmd=">>gamma_vasp_cmd<<",
-                 **cust, **kwargs):
+                 cust_args=None, **kwargs):
         """
         Args:
             spec (dict): Specification of the job to run.
@@ -462,7 +462,7 @@ class NEBFW(Firework):
             user_incar_settings (dict): Additional INCAR settings.
             vasp_cmd (str): Command to run vasp.
             gamma_vasp_cmd (str): Command to run vasp gamma.
-            \*\*cust: Other kwargs that are passed to RunVaspCustodian.
+            cust_args (dict): Other kwargs that are passed to RunVaspCustodian.
             \*\*kwargs: Other kwargs that are passed to Firework.__init__.
         """
         logger.info("CI-NEB Firework in NEB Workflow.")
@@ -484,7 +484,7 @@ class NEBFW(Firework):
         # Task 2: Run NEB using Custodian
         run_neb_task = RunVaspCustodian(vasp_cmd=vasp_cmd,
                                         gamma_vasp_cmd=gamma_vasp_cmd,
-                                        job_type="neb", **cust)
+                                        job_type="neb", **cust_args)
 
         # Task 3
         tasks = [write_neb_task,
