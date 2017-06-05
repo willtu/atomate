@@ -297,6 +297,11 @@ class WriteNEBFromEndpoints(FiretaskBase):
 
         # Get number of images.
         nimages = user_incar_settings.get("IMAGES", self._get_nimages(ep0, ep1))
+        delta_p = fw_spec["delta_coords"]
+        delta_ep = (ep1.frac_coords-ep0.frac_coords).round(1)
+        delta = delta_p - delta_ep
+        new_frac = ep1.frac_coords + delta
+        ep1 = Structure(lattice=ep1.lattice, coords=new_frac, species=ep1.species)
         if interpolation_type == "IDPP":
             from pymatgen_diffusion.neb.pathfinder import IDPPSolver
 
