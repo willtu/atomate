@@ -298,16 +298,18 @@ class WriteNEBFromEndpoints(FiretaskBase):
         # Get number of images.
         nimages = user_incar_settings.get("IMAGES", self._get_nimages(ep0, ep1))
         delta_p = fw_spec["delta_coords"]
-        delta_ep = (ep1.frac_coords-ep0.frac_coords).round(1)
-        delta = delta_p - delta_ep
+        delta_ep = (ep1.frac_coords-ep0.frac_coords)
+        delta = (delta_p - delta_ep).round(0)
         new_frac = ep1.frac_coords + delta
         ep1 = Structure(lattice=ep1.lattice, coords=new_frac, species=ep1.species)
+        print("endpoint1 structure:\n",ep1)
         if interpolation_type == "IDPP":
             from pymatgen_diffusion.neb.pathfinder import IDPPSolver
 
-            obj = IDPPSolver.from_endpoints([ep0, ep1], nimages=nimages)
+            obj = IDPPSolver.from_endpoints([ep0, ep1], pbc=False, nimages=nimages)
             images = obj.run(species=idpp_species)
             images_dic_list = [image.as_dict() for image in images]
+            print("images structure: \n", images)
         elif interpolation_type == "linear":
             images = self._get_images_by_linear_interp(nimages, ep0, ep1)
             images_dic_list = [i.as_dict() for i in images]

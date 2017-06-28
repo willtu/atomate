@@ -285,12 +285,15 @@ def get_wf_neb_from_images(parent, images, user_incar_settings, additional_spec=
 
     spec = _update_spec(additional_spec)
     spec["parent"] = parent.as_dict()
+    spec["ep0"] = images[0].as_dict()
+    spec["ep1"] = images[-1].as_dict()
     assert isinstance(images, list) and len(images) >= 3
     spec["neb"] = [[s.as_dict() for s in images]]
     spec["_queueadapter"] = {"nnodes": str(len(images) - 2), "nodes": str(len(images) - 2)}
     if spec["neb_walltime"] is not None:
         spec["_queueadapter"].update({"walltime": spec.get("neb_walltime")})
     wf_name = spec["wf_name"]
+    is_optimized = spec["is_optimized"]
 
     # Assume one round NEB if user_incar_settings not provided.
     user_incar_settings = user_incar_settings or [{}, {}, {}]
@@ -298,22 +301,29 @@ def get_wf_neb_from_images(parent, images, user_incar_settings, additional_spec=
     user_kpoints_settings = user_kpoints_settings or [{"grid_density": 1000}] * (neb_round + 2)
     additional_cust_args = additional_cust_args or [{}] * (neb_round + 2)
 
-    fws = []
+    neb_fws = []
     # Get neb fireworks.
     for n in range(neb_round):
         fw = NEBFW(spec=spec, neb_label=str(n + 1), from_images=True,
                    user_incar_settings=user_incar_settings[n + 2],
                    user_kpoints_settings=user_kpoints_settings[n + 2],
                    additional_cust_args=additional_cust_args[n + 2])
-        fws.append(fw)
+        neb_fws.append(fw)
 
-    # Build fireworks link
-    links_dict = {}
-    if neb_round >= 2:
-        for i in range(neb_round - 1):
-            links_dict[fws[i]] = [fws[i + 1]]
-    workflow = Workflow(fws, name=wf_name, links_dict=links_dict)
+    if not is_optimized:
+        ep_fws = []
+        for i in ["ep0", "ep1"]:
+            fw = NEBRelaxationFW(spec=spec, label=i, user_incar_settings=user_incar_settings[1],user_kpoints_settings=user_kpoints_settings[1],additional_cust_args=additional_cust_args[1])
+            ep_fws.append(fw)
 
+        # Build fireworks link
+        fws = ep_fws + neb_fws
+        links = {ep_fws[0]: [neb_fws[0]], ep_fws[1]: [neb_fws[0]]}
+        for r in range(1, neb_round):
+            links[neb_fws[r - 1]] = [neb_fws[r]]
+
+        workflow = Workflow(fws, links_dict=links, name=wf_name)
+ 
     return workflow
 
 
